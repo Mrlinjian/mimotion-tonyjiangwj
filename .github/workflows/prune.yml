@@ -1,0 +1,37 @@
+name: Prune old runs
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete runs older than 3 days
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+            const { owner, repo } = context.repo;
+            let deleted = 0;
+            for (let batch = 0; batch < 6; batch++) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner, repo, per_page: 100, created: `<${cutoff}`, status: 'completed'
+              });
+              if (!data.workflow_runs.length) break;
+              for (const run of data.workflow_runs) {
+                try {
+                  await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+                  deleted++;
+                } catch (e) {
+                  core.warning(`rate limited, stop at ${deleted}`);
+                  return;
+                }
+              }
+            }
+            core.info(`deleted ${deleted} runs`);
